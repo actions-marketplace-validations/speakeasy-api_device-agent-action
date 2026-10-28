@@ -95,25 +95,30 @@ sudo mkdir -p "$(dirname "$managed")"
 printf '%s\n' "$config" | sudo tee "$managed" >/dev/null
 sudo chmod 0644 "$managed"
 
-# job_subject prints this job's OIDC subject, the value an administrator
-# admits. It requests a throwaway token for a diagnostics audience and never
-# prints the token.
+# job_subject sets subject to this job's OIDC subject, the value an
+# administrator admits. It requests a throwaway token for a diagnostics
+# audience and masks it. It sets a variable instead of printing: a mask command
+# printed inside $(...) is captured rather than reaching the runner, and the
+# token would land in the log.
+subject=unknown
 job_subject() {
-	local jwt payload
+	local jwt payload sub
 	jwt="$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-		"$ACTIONS_ID_TOKEN_REQUEST_URL&audience=speakeasy-diagnostics" | jq -r .value)" || return 1
+		"$ACTIONS_ID_TOKEN_REQUEST_URL&audience=speakeasy-diagnostics" | jq -r .value)" || return 0
+	{ [ -n "$jwt" ] && [ "$jwt" != null ]; } || return 0
 	echo "::add-mask::$jwt"
 	payload="$(printf '%s' "$jwt" | cut -d. -f2 | tr '_-' '/+')"
 	while [ $((${#payload} % 4)) -ne 0 ]; do payload="$payload="; done
-	printf '%s' "$payload" | base64 -d 2>/dev/null | jq -r .sub
+	sub="$(printf '%s' "$payload" | base64 -d 2>/dev/null | jq -r .sub)" || return 0
+	[ -z "$sub" ] || subject="$sub"
 }
 
 # Speakeasy answers every refused exchange with the same invalid_grant, so the
 # log carries what an administrator needs to fix it.
 explain_fetch_failure() {
-	local errors subject
+	local errors
 	errors="$(cat "$errlog")"
-	subject="$(job_subject || echo unknown)"
+	job_subject
 	if grep -q 'control plane answered 4' <<<"$errors"; then
 		echo "::error title=Speakeasy::Speakeasy refused this job's GitHub token. Subject: $subject"
 		echo "An administrator must, in Speakeasy:"
