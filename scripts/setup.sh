@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# Connects this job's AI tools to Speakeasy with the job's GitHub OIDC token:
+# installs speakeasyd, writes its managed configuration, and runs one sync.
+#
+# speakeasyd does the token work itself (device-agent ADR-0025): it asks the
+# Actions runtime for an OIDC token, exchanges it at the organization's
+# device-agent endpoint, and writes each tool's MCP entries with a helper that
+# fetches a fresh token per connection. This script never sees or prints a
+# Speakeasy token.
+set -euo pipefail
+
+RELEASES=https://storage.googleapis.com/speakeasy-device-agent-releases-prod
+ISSUER=https://token.actions.githubusercontent.com
+
+notice() { echo "::notice title=Speakeasy::$*"; }
+warn() { echo "::warning title=Speakeasy::$*"; }
+fail() {
+	echo "::error title=Speakeasy::$*"
+	exit 1
+}
+output() { echo "$1=$2" >>"$GITHUB_OUTPUT"; }
+
+org="${INPUT_ORGANIZATION_ID:-}"
+project="${INPUT_PROJECT:-}"
+control_plane="${INPUT_CONTROL_PLANE_URL%/}"
+[ -n "$org" ] || fail "Set the organization-id input to your Speakeasy organization ID."
+case "$control_plane" in
+https://*) ;;
+*) fail "control-plane-url must be an https URL, got: $control_plane" ;;
+esac
+
+# Pull requests from forks get no OIDC token, so skip them. Any other job
+# without one is missing the permission.
+if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+	if [ "${IS_FORK_PR:-false}" = true ]; then
+		notice "Skipped: pull requests from forks get no GitHub OIDC token."
+		output skipped true
+		exit 0
+	fi
+	fail 'This job has no GitHub OIDC token. Add "permissions: id-token: write" to the job.'
+fi
+output skipped false
+
+case "${RUNNER_OS:-}" in
+Linux)
+	os=linux
+	managed=/etc/speakeasy/managed.json
+	;;
+macOS)
+	os=darwin
+	managed="/Library/Application Support/Speakeasy/managed.json"
+	;;
+*) fail "Runner OS ${RUNNER_OS:-unknown} is not supported. Use a Linux or macOS runner." ;;
+esac
+case "${RUNNER_ARCH:-}" in
+X64) arch=amd64 ;;
+ARM64) arch=arm64 ;;
+*) fail "Runner architecture ${RUNNER_ARCH:-unknown} is not supported." ;;
+esac
+
+# Install speakeasyd at a fixed path: the MCP entries written below run it as
+# a header helper in later steps.
+bin=/usr/local/bin/speakeasyd
+sudo mkdir -p "$(dirname "$bin")"
+if [ -n "${INPUT_SPEAKEASYD_BINARY:-}" ]; then
+	[ -x "$INPUT_SPEAKEASYD_BINARY" ] || fail "speakeasyd-binary is not an executable file: $INPUT_SPEAKEASYD_BINARY"
+	sudo install -m 0755 "$INPUT_SPEAKEASYD_BINARY" "$bin"
+	warn "Using speakeasyd from $INPUT_SPEAKEASYD_BINARY, not the pinned release $SPEAKEASYD_VERSION."
+else
+	sum_var="SPEAKEASYD_SHA256_$(printf '%s_%s' "$os" "$arch" | tr '[:lower:]' '[:upper:]')"
+	want="${!sum_var:-}"
+	[ -n "$want" ] || fail "This action pins no speakeasyd checksum for $os/$arch."
+	download="$RUNNER_TEMP/speakeasyd"
+	curl -fsSL --retry 3 -o "$download" "$RELEASES/v$SPEAKEASYD_VERSION/speakeasyd_${SPEAKEASYD_VERSION}_${os}_${arch}"
+	got="$(shasum -a 256 "$download" | cut -d' ' -f1)"
+	if [ "$got" != "$want" ]; then
+		rm -f "$download"
+		fail "speakeasyd $SPEAKEASYD_VERSION for $os/$arch has SHA-256 $got, but this action pins $want. Stopped."
+	fi
+	sudo install -m 0755 "$download" "$bin"
+	rm -f "$download"
+fi
+
+# The managed layer holds no secret: an organization, a project and where to
+# get the identity. It must be root-owned, because speakeasyd refuses a
+# control-plane override from a user-writable file.
+config="$(jq -n --arg org "$org" --arg cp "$control_plane" --arg project "$project" '{
+	v: 1,
+	environment: "ephemeral",
+	_control_plane_url: $cp,
+	workload_identity: ({source: "github_actions", organization_id: $org}
+		+ (if $project == "" then {} else {hooks_project_slug: $project} end))
+}')"
+sudo mkdir -p "$(dirname "$managed")"
+printf '%s\n' "$config" | sudo tee "$managed" >/dev/null
+sudo chmod 0644 "$managed"
+
+# job_subject prints this job's OIDC subject, the value an administrator
+# admits. It requests a throwaway token for a diagnostics audience and never
+# prints the token.
+job_subject() {
+	local jwt payload
+	jwt="$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+		"$ACTIONS_ID_TOKEN_REQUEST_URL&audience=speakeasy-diagnostics" | jq -r .value)" || return 1
+	echo "::add-mask::$jwt"
+	payload="$(printf '%s' "$jwt" | cut -d. -f2 | tr '_-' '/+')"
+	while [ $((${#payload} % 4)) -ne 0 ]; do payload="$payload="; done
+	printf '%s' "$payload" | base64 -d 2>/dev/null | jq -r .sub
+}
+
+# Speakeasy answers every refused exchange with the same invalid_grant, so the
+# log carries what an administrator needs to fix it.
+explain_fetch_failure() {
+	local errors subject
+	errors="$(cat "$errlog")"
+	subject="$(job_subject || echo unknown)"
+	if grep -q 'control plane answered 4' <<<"$errors"; then
+		echo "::error title=Speakeasy::Speakeasy refused this job's GitHub token. Subject: $subject"
+		echo "An administrator must, in Speakeasy:"
+		echo "  1. Register $ISSUER as a workload issuer available to the organization, not to one project."
+		echo "  2. Admit the exact subject $subject under that issuer and assign it to an agent."
+		echo "  3. Give that agent org:device_agent_sync (Agent > Permissions > Platform access)."
+		exit 1
+	fi
+	if grep -q 'HTTP 403' <<<"$errors"; then
+		fail "Speakeasy accepted this job (subject $subject), but its agent needs org:device_agent_sync. In Speakeasy: Agent > Permissions > Platform access."
+	fi
+	fail "speakeasyd could not fetch this job's policy: $(tail -n 3 "$errlog")"
+}
+
+report="$RUNNER_TEMP/speakeasy-sync.json"
+errlog="$RUNNER_TEMP/speakeasy-sync.log"
+output report "$report"
+set +e
+"$bin" sync --once --json >"$report" 2>"$errlog"
+code=$?
+set -e
+case "$code" in
+0) ;;
+2) explain_fetch_failure ;;
+3) fail "speakeasyd did not pick up the GitHub identity: $(tail -n 1 "$errlog") GitHub Actions support needs a speakeasyd release with device-agent #240; this action pins $SPEAKEASYD_VERSION." ;;
+*) fail "speakeasyd sync failed (exit $code): $(tail -n 3 "$errlog")" ;;
+esac
+
+jq -r '
+	"Control plane  \(.control_plane)",
+	"Egress         \(.egress)",
+	(if .agent then "Agent          \(.agent.name // .agent.principal)" else empty end),
+	(.tools[] | "\(.tool | . + " " * (15 - length))\(.status)\(if .reason then " (\(.reason))" else "" end)")
+' "$report"
+pending="$(jq -r '[.tools[] | select(.status == "pending" or .status == "error") | .tool] | join(", ")' "$report")"
+[ -z "$pending" ] || warn "Not set up: $pending. Install those tools before this step, or see the report at $report."
+[ -n "$project" ] || warn "Hook events are off: set the project input."
+notice "Speakeasy is ready for this job."

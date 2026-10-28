@@ -1,0 +1,55 @@
+name: Speakeasy device agent
+description: Connect this job's AI tools to Speakeasy with the job's GitHub OIDC token. No stored secret.
+author: Speakeasy
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  organization-id:
+    description: Your Speakeasy organization ID.
+    required: true
+  project:
+    description: Speakeasy project slug for this job. Hook events go to it. Leave it empty to turn hook events off.
+    required: false
+    default: ""
+  control-plane-url:
+    description: >-
+      The Speakeasy control plane. speakeasyd builds the token audience from it, so it must be the host
+      that serves the device-agent API.
+    required: false
+    default: https://ai.speakeasy.com
+  speakeasyd-binary:
+    description: >-
+      Path to a speakeasyd binary already on the runner, used instead of the pinned release. For testing
+      unreleased builds only.
+    required: false
+    default: ""
+
+outputs:
+  report:
+    description: Path to the JSON report from `speakeasyd sync --once`.
+    value: ${{ steps.setup.outputs.report }}
+  skipped:
+    description: "`true` when the step skipped, for example on a pull request from a fork."
+    value: ${{ steps.setup.outputs.skipped }}
+
+runs:
+  using: composite
+  steps:
+    - id: setup
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/setup.sh"
+      env:
+        INPUT_ORGANIZATION_ID: ${{ inputs.organization-id }}
+        INPUT_PROJECT: ${{ inputs.project }}
+        INPUT_CONTROL_PLANE_URL: ${{ inputs.control-plane-url }}
+        INPUT_SPEAKEASYD_BINARY: ${{ inputs.speakeasyd-binary }}
+        IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork == true }}
+        # One speakeasyd release for each action release. Bump the version and every checksum together,
+        # from the stable releases.json in the speakeasy-device-agent-releases-prod bucket.
+        SPEAKEASYD_VERSION: "0.1.47"
+        SPEAKEASYD_SHA256_LINUX_AMD64: e1cfe47e6282b753256e23aa4d1b35c6b28f2ee3f0b1543b9e511249c0fe7ca5
+        SPEAKEASYD_SHA256_LINUX_ARM64: 7b7b5b029bdb24630ee13ca7a7448d8dc0af4ea8959bd2316f04c4bac50dcee5
+        SPEAKEASYD_SHA256_DARWIN_AMD64: a97c1b84a41d6537f6d76ce6586c2c5d7af5e713ac9ce0506d2db991c5df1615
+        SPEAKEASYD_SHA256_DARWIN_ARM64: 642a71d26dc9d3f71b0d3a8a3b17a9d838f110a98efbe77f1c39d41733d6e5bd
