@@ -33,6 +33,9 @@ outputs:
   skipped:
     description: "`true` when the step skipped, for example on a pull request from a fork."
     value: ${{ steps.setup.outputs.skipped }}
+  daemon:
+    description: "`true` when a speakeasyd is running for later steps to get tokens from."
+    value: ${{ steps.setup.outputs.daemon }}
 
 runs:
   using: composite

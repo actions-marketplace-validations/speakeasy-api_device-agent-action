@@ -36,6 +36,7 @@ steps:
 |---|---|
 | `report` | Path to the JSON report from `speakeasyd sync --once`. |
 | `skipped` | `true` when the step skipped, for example on a pull request from a fork. |
+| `daemon` | `true` when a speakeasyd is running for later steps to get tokens from. |
 
 ## How it works
 
@@ -45,6 +46,7 @@ steps:
    {
      "v": 1,
      "environment": "ephemeral",
+     "auto_update": "disabled",
      "_control_plane_url": "https://ai.speakeasy.com",
      "workload_identity": {"source": "github_actions", "organization_id": "<org>", "hooks_project_slug": "<project>"}
    }
@@ -53,6 +55,7 @@ steps:
    - It asks GitHub for an OIDC token whose audience is `https://ai.speakeasy.com/oauth/workload/device-agent/<org>/token`.
    - It exchanges it there for a 15-minute device-agent token and fetches the agent's plugins.
    - It writes each tool's MCP entries with a helper, `speakeasyd mcp-token`, that gets a fresh token for every connection. No token is written to disk.
+4. **Keep a daemon running.** The action starts `speakeasyd` in the background for the rest of the job. `anthropics/claude-code-action` removes GitHub's OIDC request variables from Claude's environment, so the helpers inside Claude can't request GitHub tokens themselves. They get short-lived Speakeasy tokens from the daemon over its owner-only socket instead.
 
 ## What an administrator sets up first
 

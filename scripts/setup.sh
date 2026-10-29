@@ -87,6 +87,7 @@ fi
 config="$(jq -n --arg org "$org" --arg cp "$control_plane" --arg project "$project" '{
 	v: 1,
 	environment: "ephemeral",
+	auto_update: "disabled",
 	_control_plane_url: $cp,
 	workload_identity: ({source: "github_actions", organization_id: $org}
 		+ (if $project == "" then {} else {hooks_project_slug: $project} end))
@@ -156,4 +157,26 @@ jq -r '
 pending="$(jq -r '[.tools[] | select(.status == "pending" or .status == "error") | .tool] | join(", ")' "$report")"
 [ -z "$pending" ] || warn "Not set up: $pending. Install those tools before this step, or see the report at $report."
 [ -n "$project" ] || warn "Hook events are off: set the project input."
+
+# Some tools run with GitHub's OIDC request variables removed:
+# anthropics/claude-code-action deletes them so Claude cannot mint tokens.
+# The token helpers then ask a running speakeasyd over its owner-only socket,
+# so start one here, where the variables still exist. It hands out short-lived
+# Speakeasy tokens, never GitHub ones, and the runner stops it when the job ends.
+case "$os" in
+darwin) socket="$HOME/Library/Application Support/Speakeasy/agent.sock" ;;
+*) socket="$HOME/.speakeasy/agent.sock" ;;
+esac
+daemon_log="$RUNNER_TEMP/speakeasyd.log"
+nohup "$bin" </dev/null >"$daemon_log" 2>&1 &
+for _ in $(seq 1 50); do
+	[ -S "$socket" ] && break
+	sleep 0.2
+done
+if [ -S "$socket" ]; then
+	output daemon true
+else
+	output daemon false
+	warn "speakeasyd did not start, so tools that cannot request GitHub tokens themselves will not connect. See $daemon_log."
+fi
 notice "Speakeasy is ready for this job."
