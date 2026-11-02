@@ -3,7 +3,7 @@
 Connect a GitHub Actions job's AI tools to Speakeasy **without storing a secret**. The job proves who it is with its own GitHub OIDC token. Claude Code and Codex in that job then get the plugins and MCP servers assigned to its Speakeasy agent, and send hook events back to Speakeasy.
 
 > [!IMPORTANT]
-> **Preview.** The action needs a speakeasyd with GitHub Actions support, which no speakeasyd release includes yet. The release it pins (0.1.47) stops with "did not pick up the GitHub identity". Until a release ships, build speakeasyd from source and pass it as `speakeasyd-binary` (see [Test before the speakeasyd release](#test-before-the-speakeasyd-release)). There is no `v1` tag yet either, so the examples use `@main`.
+> **Preview.** The action needs a speakeasyd with GitHub Actions support (device-agent #296), which no stable speakeasyd release includes yet. Until one does, the release the action installs stops with "did not pick up the GitHub identity", so build speakeasyd from device-agent `main` and pass it as `speakeasyd-binary` (see [Test before the speakeasyd release](#test-before-the-speakeasyd-release)). There is no `v1` tag yet either, so the examples use `@main`.
 
 ## Set up Speakeasy (once, as an administrator)
 
@@ -78,7 +78,8 @@ steps:
 | `organization-id` | yes | Your Speakeasy organization ID. |
 | `project` | no | Speakeasy project slug for this job's hook events. Leave it empty to turn hook events off. |
 | `control-plane-url` | no | Defaults to `https://ai.speakeasy.com`. The token audience is built from it, so it must be the host that serves the device-agent API. |
-| `speakeasyd-binary` | no | Path to a speakeasyd already on the runner, used instead of the pinned release. Only for testing unreleased builds. |
+| `version` | no | The speakeasyd to install. Defaults to `latest`, the latest stable release. Set a stable version like `0.1.52` (a leading `v` is fine) for reproducible builds: pinning the action to a SHA doesn't pin speakeasyd. |
+| `speakeasyd-binary` | no | Path to a speakeasyd already on the runner, used instead of a release. Only for testing unreleased builds. |
 
 ## Outputs
 
@@ -87,10 +88,11 @@ steps:
 | `report` | Path to the JSON report from `speakeasyd sync --once`: the agent, and each tool's status. |
 | `skipped` | `true` when the step skipped, for example on a pull request from a fork. |
 | `daemon` | `true` when speakeasyd is running for later steps to get tokens from. |
+| `version` | The speakeasyd version installed, like `0.1.52`. Empty with `speakeasyd-binary`. |
 
 ## How it works
 
-1. **Install.** The action downloads the speakeasyd release it pins, checks its SHA-256 and installs it at `/usr/local/bin/speakeasyd`.
+1. **Install.** The action finds the release in Speakeasy's stable release records (`releases.json` for `latest`, `release-history.json` for a pinned `version`) and refuses one Speakeasy has blocked. It downloads the runner's build over HTTPS from Speakeasy's releases bucket, checks its SHA-256 and size against the records, stops on any mismatch, and installs it at `/usr/local/bin/speakeasyd`.
 2. **Configure.** It writes a root-owned managed configuration (`/etc/speakeasy/managed.json` on Linux). The file holds no secret, only where the identity comes from:
    ```json
    {
@@ -114,7 +116,9 @@ Nothing writes a token to disk or to the job log. speakeasyd only hands out shor
 | Error: the job has no GitHub OIDC token | Add `id-token: write` to the job's `permissions`. |
 | Error: Speakeasy refused this job's GitHub token | Check the first two setup steps for the subject printed in the error. Speakeasy gives the same `invalid_grant` for every refusal, so the action can't tell which step is missing. |
 | Error naming `org:device_agent_sync` | Give the agent that permission. |
-| Error: did not pick up the GitHub identity | The speakeasyd in use has no GitHub Actions support. See the preview note at the top. |
+| Error: did not pick up the GitHub identity | The speakeasyd the error names has no GitHub Actions support. See the preview note at the top. |
+| Error: a speakeasyd version is not a stable release, or is blocked | Set `version` to another stable release, or to `latest`. |
+| Error: a speakeasyd SHA-256 or size doesn't match | The download doesn't match Speakeasy's release records. Tell Speakeasy rather than working around it. |
 | Warning: a tool is not set up | Install it before this step, or read the sync report. |
 | Warning: hook events are off | Set the `project` input. |
 | An MCP server shows "needs authentication" | Give the agent access to that server. speakeasyd logs `invalid_grant` for it and backs off. |
@@ -128,13 +132,13 @@ Nothing writes a token to disk or to the job log. speakeasyd only hands out shor
 
 ## Test before the speakeasyd release
 
-Build speakeasyd from the device-agent branch with GitHub Actions support and pass it in:
+Build speakeasyd from device-agent `main`, which has GitHub Actions support, and pass it in:
 
 ```yaml
 - uses: actions/checkout@v7
   with:
     repository: speakeasy-api/device-agent
-    ref: brad/dno-1341-da-mint-and-rotate-the-mcpconnect-credential-from-the
+    ref: main
     path: device-agent
 - uses: actions/setup-go@v7
   with:

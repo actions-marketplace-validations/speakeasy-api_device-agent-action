@@ -9,7 +9,6 @@
 # Speakeasy token.
 set -euo pipefail
 
-RELEASES=https://storage.googleapis.com/speakeasy-device-agent-releases-prod
 ISSUER=https://token.actions.githubusercontent.com
 
 notice() { echo "::notice title=Speakeasy::$*"; }
@@ -65,20 +64,18 @@ sudo mkdir -p "$(dirname "$bin")"
 if [ -n "${INPUT_SPEAKEASYD_BINARY:-}" ]; then
 	[ -x "$INPUT_SPEAKEASYD_BINARY" ] || fail "speakeasyd-binary is not an executable file: $INPUT_SPEAKEASYD_BINARY"
 	sudo install -m 0755 "$INPUT_SPEAKEASYD_BINARY" "$bin"
-	warn "Using speakeasyd from $INPUT_SPEAKEASYD_BINARY, not the pinned release $SPEAKEASYD_VERSION."
+	installed="speakeasyd from $INPUT_SPEAKEASYD_BINARY"
+	case "${INPUT_VERSION:-latest}" in
+	latest) warn "Using speakeasyd from $INPUT_SPEAKEASYD_BINARY, not a release." ;;
+	*) warn "Using speakeasyd from $INPUT_SPEAKEASYD_BINARY, not a release. The version input is ignored." ;;
+	esac
 else
-	sum_var="SPEAKEASYD_SHA256_$(printf '%s_%s' "$os" "$arch" | tr '[:lower:]' '[:upper:]')"
-	want="${!sum_var:-}"
-	[ -n "$want" ] || fail "This action pins no speakeasyd checksum for $os/$arch."
 	download="$RUNNER_TEMP/speakeasyd"
-	curl -fsSL --retry 3 -o "$download" "$RELEASES/v$SPEAKEASYD_VERSION/speakeasyd_${SPEAKEASYD_VERSION}_${os}_${arch}"
-	got="$(shasum -a 256 "$download" | cut -d' ' -f1)"
-	if [ "$got" != "$want" ]; then
-		rm -f "$download"
-		fail "speakeasyd $SPEAKEASYD_VERSION for $os/$arch has SHA-256 $got, but this action pins $want. Stopped."
-	fi
+	version="$(bash "$(dirname "$0")/download-speakeasyd.sh" "${INPUT_VERSION:-latest}" "$os" "$arch" "$download")"
 	sudo install -m 0755 "$download" "$bin"
 	rm -f "$download"
+	installed="speakeasyd $version"
+	output version "$version"
 fi
 
 # The managed layer holds no secret: an organization, a project and where to
@@ -144,10 +141,11 @@ set -e
 case "$code" in
 0) ;;
 2) explain_fetch_failure ;;
-3) fail "speakeasyd did not pick up the GitHub identity: $(tail -n 1 "$errlog") GitHub Actions support needs a speakeasyd release with device-agent #240; this action pins $SPEAKEASYD_VERSION." ;;
+3) fail "$installed did not pick up the GitHub identity ($(tail -n 1 "$errlog")). This action needs a speakeasyd release with GitHub Actions support: use latest once one is stable, or set the version input to one." ;;
 *) fail "speakeasyd sync failed (exit $code): $(tail -n 3 "$errlog")" ;;
 esac
 
+echo "speakeasyd     ${version:-from $INPUT_SPEAKEASYD_BINARY}"
 jq -r '
 	"Control plane  \(.control_plane)",
 	"Egress         \(.egress)",
