@@ -19,10 +19,16 @@ inputs:
       that serves the device-agent API.
     required: false
     default: https://ai.speakeasy.com
+  version:
+    description: >-
+      The speakeasyd version to install: `latest` for the latest stable release, or a stable version like
+      `0.1.52`. Pin one for reproducible builds: pinning this action does not pin speakeasyd.
+    required: false
+    default: latest
   speakeasyd-binary:
     description: >-
-      Path to a speakeasyd binary already on the runner, used instead of the pinned release. For testing
-      unreleased builds only.
+      Path to a speakeasyd binary already on the runner, used instead of a release. For testing unreleased
+      builds only.
     required: false
     default: ""
 
@@ -36,6 +42,9 @@ outputs:
   daemon:
     description: "`true` when a speakeasyd is running for later steps to get tokens from."
     value: ${{ steps.setup.outputs.daemon }}
+  version:
+    description: The speakeasyd version installed, for example `0.1.52`. Empty with `speakeasyd-binary`.
+    value: ${{ steps.setup.outputs.version }}
 
 runs:
   using: composite
@@ -47,12 +56,6 @@ runs:
         INPUT_ORGANIZATION_ID: ${{ inputs.organization-id }}
         INPUT_PROJECT: ${{ inputs.project }}
         INPUT_CONTROL_PLANE_URL: ${{ inputs.control-plane-url }}
+        INPUT_VERSION: ${{ inputs.version }}
         INPUT_SPEAKEASYD_BINARY: ${{ inputs.speakeasyd-binary }}
         IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork == true }}
-        # One speakeasyd release for each action release. Bump the version and every checksum together,
-        # from the stable releases.json in the speakeasy-device-agent-releases-prod bucket.
-        SPEAKEASYD_VERSION: "0.1.47"
-        SPEAKEASYD_SHA256_LINUX_AMD64: e1cfe47e6282b753256e23aa4d1b35c6b28f2ee3f0b1543b9e511249c0fe7ca5
-        SPEAKEASYD_SHA256_LINUX_ARM64: 7b7b5b029bdb24630ee13ca7a7448d8dc0af4ea8959bd2316f04c4bac50dcee5
-        SPEAKEASYD_SHA256_DARWIN_AMD64: a97c1b84a41d6537f6d76ce6586c2c5d7af5e713ac9ce0506d2db991c5df1615
-        SPEAKEASYD_SHA256_DARWIN_ARM64: 642a71d26dc9d3f71b0d3a8a3b17a9d838f110a98efbe77f1c39d41733d6e5bd
