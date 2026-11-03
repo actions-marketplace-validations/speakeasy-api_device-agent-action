@@ -21,6 +21,7 @@ output() { echo "$1=$2" >>"$GITHUB_OUTPUT"; }
 org="${INPUT_ORGANIZATION_ID:-}"
 project="${INPUT_PROJECT:-}"
 control_plane="${INPUT_CONTROL_PLANE_URL%/}"
+channel="${INPUT_CHANNEL:-stable}"
 [ -n "$org" ] || fail "Set the organization-id input to your Speakeasy organization ID."
 case "$control_plane" in
 https://*) ;;
@@ -63,17 +64,17 @@ sudo mkdir -p "$(dirname "$bin")"
 if [ -n "${INPUT_SPEAKEASYD_BINARY:-}" ]; then
 	[ -x "$INPUT_SPEAKEASYD_BINARY" ] || fail "speakeasyd-binary is not an executable file: $INPUT_SPEAKEASYD_BINARY"
 	sudo install -m 0755 "$INPUT_SPEAKEASYD_BINARY" "$bin"
-	installed="speakeasyd from $INPUT_SPEAKEASYD_BINARY"
-	case "${INPUT_VERSION:-latest}" in
-	latest) warn "Using speakeasyd from $INPUT_SPEAKEASYD_BINARY, not a release." ;;
-	*) warn "Using speakeasyd from $INPUT_SPEAKEASYD_BINARY, not a release. The version input is ignored." ;;
-	esac
+	installed="from $INPUT_SPEAKEASYD_BINARY"
+	note="Using speakeasyd $installed, not a release."
+	[ "${INPUT_VERSION:-latest}" = latest ] || note="$note The version input is ignored."
+	[ "$channel" = stable ] || note="$note The channel input is ignored."
+	warn "$note"
 else
 	download="$RUNNER_TEMP/speakeasyd"
-	version="$(bash "$(dirname "$0")/download-speakeasyd.sh" "${INPUT_VERSION:-latest}" "$os" "$arch" "$download")"
+	version="$(bash "$(dirname "$0")/download-speakeasyd.sh" "${INPUT_VERSION:-latest}" "$os" "$arch" "$download" "$channel")"
 	sudo install -m 0755 "$download" "$bin"
 	rm -f "$download"
-	installed="speakeasyd $version"
+	installed="$version ($channel channel)"
 	output version "$version"
 fi
 
@@ -145,14 +146,14 @@ case "$code" in
 	if [ -n "${INPUT_SPEAKEASYD_BINARY:-}" ]; then
 		fix="That binary has no GitHub Actions support."
 	else
-		fix="It has no GitHub Actions support: use the latest stable release, or set the version input to one that has it."
+		fix="It has no GitHub Actions support: use the latest $channel release, or set the version input to one that has it."
 	fi
-	fail "$installed did not pick up the GitHub identity ($(tail -n 1 "$errlog")). $fix"
+	fail "speakeasyd $installed did not pick up the GitHub identity ($(tail -n 1 "$errlog")). $fix"
 	;;
 *) fail "speakeasyd sync failed (exit $code): $(tail -n 3 "$errlog")" ;;
 esac
 
-echo "speakeasyd     ${version:-from $INPUT_SPEAKEASYD_BINARY}"
+echo "speakeasyd     $installed"
 jq -r '
 	"Control plane  \(.control_plane)",
 	"Egress         \(.egress)",

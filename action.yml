@@ -25,6 +25,12 @@ inputs:
       `0.1.52`. Pin one for reproducible builds: pinning this action does not pin speakeasyd.
     required: false
     default: latest
+  channel:
+    description: >-
+      The speakeasyd release channel: `stable` or `internal`. `internal` is Speakeasy's dogfood channel, for
+      testing unreleased speakeasyd builds. It is unsupported: builds there may be broken or pulled.
+    required: false
+    default: stable
   speakeasyd-binary:
     description: >-
       Path to a speakeasyd binary already on the runner, used instead of a release. For testing unreleased
@@ -57,5 +63,6 @@ runs:
         INPUT_PROJECT: ${{ inputs.project }}
         INPUT_CONTROL_PLANE_URL: ${{ inputs.control-plane-url }}
         INPUT_VERSION: ${{ inputs.version }}
+        INPUT_CHANNEL: ${{ inputs.channel }}
         INPUT_SPEAKEASYD_BINARY: ${{ inputs.speakeasyd-binary }}
         IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork == true }}
