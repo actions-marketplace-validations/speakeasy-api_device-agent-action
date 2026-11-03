@@ -2,9 +2,6 @@
 
 Connect a GitHub Actions job's AI tools to Speakeasy **without storing a secret**. The job proves who it is with its own GitHub OIDC token. Claude Code and Codex in that job then get the plugins and MCP servers assigned to its Speakeasy agent, and send hook events back to Speakeasy.
 
-> [!IMPORTANT]
-> **Preview.** The action needs a speakeasyd with GitHub Actions support (device-agent #296), which no stable speakeasyd release includes yet. Until one does, the release the action installs stops with "did not pick up the GitHub identity", so build speakeasyd from device-agent `main` and pass it as `speakeasyd-binary` (see [Test before the speakeasyd release](#test-before-the-speakeasyd-release)). There is no `v1` tag yet either, so the examples use `@main`.
-
 ## Set up Speakeasy (once, as an administrator)
 
 | Step | Why |
@@ -38,12 +35,14 @@ permissions:
 
 steps:
   - run: npm install -g @anthropic-ai/claude-code
-  - uses: speakeasy-api/device-agent-action@main
+  - uses: speakeasy-api/device-agent-action@v1
     with:
       organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
       project: ci # hook events go to this project
   - run: claude -p "Summarize the open incidents" # has the agent's Speakeasy MCP servers
 ```
+
+For fully reproducible builds, pin the action to a commit SHA with a `# v1.x.y` comment, and pin speakeasyd with `version`.
 
 ### With `anthropics/claude-code-action`
 
@@ -52,7 +51,7 @@ This works with no stored secret on either side: the Anthropic API takes the job
 ```yaml
 steps:
   - run: npm install -g @anthropic-ai/claude-code
-  - uses: speakeasy-api/device-agent-action@main
+  - uses: speakeasy-api/device-agent-action@v1
     with:
       organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
       project: ci
@@ -116,7 +115,7 @@ Nothing writes a token to disk or to the job log. speakeasyd only hands out shor
 | Error: the job has no GitHub OIDC token | Add `id-token: write` to the job's `permissions`. |
 | Error: Speakeasy refused this job's GitHub token | Check the first two setup steps for the subject printed in the error. Speakeasy gives the same `invalid_grant` for every refusal, so the action can't tell which step is missing. |
 | Error naming `org:device_agent_sync` | Give the agent that permission. |
-| Error: did not pick up the GitHub identity | The speakeasyd the error names has no GitHub Actions support. See the preview note at the top. |
+| Error: did not pick up the GitHub identity | The speakeasyd in use has no GitHub Actions support. Use the latest stable release, or set `version` to one that has it. |
 | Error: a speakeasyd version is not a stable release, or is blocked | Set `version` to another stable release, or to `latest`. |
 | Error: a speakeasyd SHA-256 or size doesn't match | The download doesn't match Speakeasy's release records. Tell Speakeasy rather than working around it. |
 | Warning: a tool is not set up | Install it before this step, or read the sync report. |
@@ -130,26 +129,8 @@ Nothing writes a token to disk or to the job log. speakeasyd only hands out shor
 - **No servers that need a person's sign-in.** A job can't complete an upstream OAuth sign-in.
 - **Hook events need hooks 0.3.41 or later** in the observability plugin. Speakeasy rolls new hooks versions out to organizations in stages.
 
-## Test before the speakeasyd release
+## License
 
-Build speakeasyd from device-agent `main`, which has GitHub Actions support, and pass it in:
-
-```yaml
-- uses: actions/checkout@v7
-  with:
-    repository: speakeasy-api/device-agent
-    ref: main
-    path: device-agent
-- uses: actions/setup-go@v7
-  with:
-    go-version-file: device-agent/go.mod
-- run: CGO_ENABLED=0 go build -o "$RUNNER_TEMP/speakeasyd" ./cmd/speakeasyd
-  working-directory: device-agent
-- uses: speakeasy-api/device-agent-action@main
-  with:
-    organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
-    project: ci
-    speakeasyd-binary: ${{ runner.temp }}/speakeasyd
-```
+MIT. See [LICENSE](LICENSE).
 
 Maintainers: see [RELEASING.md](RELEASING.md).

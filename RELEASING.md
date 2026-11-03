@@ -4,9 +4,9 @@ The action installs the latest stable speakeasyd when it runs, or the release a 
 
 1. Tag the release (`v1.x.y`) and move the major tag (`v1`) to it.
 
-## Before the first Marketplace release
+## The first release
 
-- Choose a license and add `LICENSE`.
-- Make the repository public.
-- Replace `@main` in the README examples with `@v1`.
-- Once a stable speakeasyd release has GitHub Actions support (device-agent #296), remove the README's preview note and its "Test before the speakeasyd release" section.
+1. Wait for a stable speakeasyd release with GitHub Actions support. Until one exists, the action stops with "did not pick up the GitHub identity".
+2. Make the repository public.
+3. Tag `v1.0.0`, create a GitHub release from it, and point `v1` at it.
+4. Optional: publish to the GitHub Marketplace by ticking "Publish this Action to the GitHub Marketplace" on the release. The repository qualifies; keep it that way: one `action.yml` at the root, `branding` set, and no workflow files. The listing name (`name` in `action.yml`) must be unique on the Marketplace.
