@@ -1,6 +1,6 @@
 # Speakeasy device agent action
 
-Connect a GitHub Actions job's AI tools to Speakeasy **without storing a secret**. The job proves who it is with its own GitHub OIDC token. Claude Code and Codex in that job then get the plugins and MCP servers assigned to its Speakeasy agent, and send hook events back to Speakeasy.
+Connect a GitHub Actions job's AI tools to Speakeasy **without storing a Speakeasy secret**. The job proves who it is to Speakeasy with its own GitHub OIDC token. Claude Code and Codex in that job then get the plugins and MCP servers assigned to its Speakeasy agent, and send hook events back to Speakeasy. The tools still sign in to their vendors themselves, for example with an API key.
 
 ## Set up Speakeasy (once, as an administrator)
 
@@ -59,49 +59,72 @@ Owner and repository names are case-sensitive. Repositories created, renamed or 
 
 ## Use it
 
-The action writes each installed tool's configuration, so install the tools first.
+The action writes each installed tool's configuration, so install the tools and create their configuration directories first.
+
+<details>
+<summary><strong>Claude Code</strong></summary>
 
 ```yaml
-permissions:
-  id-token: write # lets the job request a GitHub OIDC token
-  contents: read
+on: workflow_dispatch
 
-steps:
-  - run: npm install -g @anthropic-ai/claude-code
-  - uses: speakeasy-api/device-agent-action@v1
-    with:
-      organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
-      project: ci # hook events go to this project
-  - run: claude -p "Summarize the open incidents" # has the agent's Speakeasy MCP servers
-```
-
-For fully reproducible builds, pin the action to a commit SHA with a `# v1.x.y` comment, and pin speakeasyd with `version`.
-
-### With `anthropics/claude-code-action`
-
-This works with no stored secret on either side: the Anthropic API takes the job's OIDC token through workload identity federation, and Speakeasy takes it through this action.
-
-```yaml
-steps:
-  - run: npm install -g @anthropic-ai/claude-code
-  - uses: speakeasy-api/device-agent-action@v1
-    with:
-      organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
-      project: ci
-  - uses: anthropics/claude-code-action@v1
-    with:
-      anthropic_federation_rule_id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
-      anthropic_organization_id: ${{ vars.ANTHROPIC_ORG_ID }}
-      anthropic_service_account_id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
-      anthropic_workspace_id: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
-      github_token: ${{ github.token }}
-      display_report: false # keeps tool output out of the step summary
-      prompt: List the Linear teams I can see.
-      claude_args: --allowedTools mcp__speakeasy-linear-1a2b
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # lets the job request a GitHub OIDC token for Speakeasy
+      contents: read
+    steps:
+      - run: |
+          npm install -g @anthropic-ai/claude-code
+          mkdir -p "$HOME/.claude"
+      - uses: speakeasy-api/device-agent-action@v1
+        with:
+          organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
+          project: ci # hook events go to this project
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: List the Linear teams I can see.
+          claude_args: --allowedTools mcp__speakeasy-linear-1a2b
 ```
 
 - `claude-code-action` removes GitHub's OIDC request variables from Claude's environment. Speakeasy's token helpers then get their tokens from the speakeasyd this action leaves running, so keep this action before it in the same job.
 - Speakeasy MCP servers are named `speakeasy-<server>-<suffix>`. Get the exact names from `claude mcp list` or the sync report, then allow them with `--allowedTools`.
+
+</details>
+
+<details>
+<summary><strong>Codex</strong></summary>
+
+```yaml
+on: workflow_dispatch
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # lets the job request a GitHub OIDC token for Speakeasy
+      contents: read
+    steps:
+      - run: |
+          npm install -g @openai/codex
+          mkdir -p "$HOME/.codex"
+      - uses: speakeasy-api/device-agent-action@v1
+        with:
+          organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
+          project: ci # hook events go to this project
+      - uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt: List the Linear teams I can see.
+```
+
+`codex-action` reads the Speakeasy MCP servers from `~/.codex`, where this action wrote them.
+
+</details>
+
+For fully reproducible builds, pin the action to a commit SHA with a `# v1.x.y` comment, and pin speakeasyd with `version`.
 
 ## Inputs
 
@@ -151,7 +174,7 @@ Nothing writes a token to disk or to the job log. speakeasyd only hands out shor
 | Error: did not pick up the GitHub identity | The speakeasyd in use has no GitHub Actions support. Use the latest stable release, or set `version` to one that has it. |
 | Error: a speakeasyd version is not a stable release, or is blocked | Set `version` to another stable release, or to `latest`. |
 | Error: a speakeasyd SHA-256 or size doesn't match | The download doesn't match Speakeasy's release records. Tell Speakeasy rather than working around it. |
-| Warning: a tool is not set up | Install it before this step, or read the sync report. |
+| Warning: a tool is not set up | Install it and create its configuration directory before this step, or read the sync report. |
 | Warning: hook events are off | Set the `project` input. |
 | An MCP server shows "needs authentication" | Edit the agent and add that server under **MCP Selection**. speakeasyd logs `invalid_grant` for it and backs off. |
 

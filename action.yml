@@ -1,5 +1,5 @@
 name: Speakeasy device agent
-description: Connect this job's AI tools to Speakeasy with the job's GitHub OIDC token. No stored secret.
+description: Connect this job's AI tools to Speakeasy with the job's GitHub OIDC token. No stored Speakeasy secret.
 author: Speakeasy
 branding:
   icon: shield
