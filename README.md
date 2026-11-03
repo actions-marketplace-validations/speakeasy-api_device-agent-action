@@ -1,74 +1,130 @@
 # Speakeasy device agent action
 
-Connect a GitHub Actions job's AI tools to Speakeasy **without storing a secret**. The job proves who it is with its own GitHub OIDC token. Claude Code and Codex in that job then get the plugins and MCP servers assigned to its Speakeasy agent, and send hook events back to Speakeasy.
+Connect a GitHub Actions job's AI tools to Speakeasy **without storing a Speakeasy secret**. The job proves who it is to Speakeasy with its own GitHub OIDC token. Claude Code and Codex in that job then get the plugins and MCP servers assigned to its Speakeasy agent, and send hook events back to Speakeasy. The tools still sign in to their vendors themselves, for example with an API key.
 
 ## Set up Speakeasy (once, as an administrator)
 
-| Step | Why |
+The Speakeasy dashboard sets up GitHub Actions for you. You need permission to manage workload identities, sync device agents and send hook events.
+
+1. Go to **Identities → Agents → New agent identity** and name the agent.
+2. Under **MCP Selection**, choose the MCP servers the job may call. Under **MCP sign-in**, choose how Speakeasy signs in to each.
+3. Under **Agent sign-in**, choose **GitHub Actions**.
+4. Under **Your repository**, enter the owner and repository, choose **Which jobs** get in (see [Subjects](#subjects)), and click **Connect GitHub Actions**.
+5. Check **What the job gets**. If it lists no plugin, assign one to Everyone or to a role the agent holds. Then copy the workflow from **Add the workflow** and add the API key secret it names.
+
+To change which jobs get in later, edit the agent.
+
+### What the guided setup does for you
+
+| What | How |
 |---|---|
-| Register `https://token.actions.githubusercontent.com` as a workload issuer, **available to the organization**. | Speakeasy doesn't look up project-level issuers for this. |
-| Under that issuer, admit the job's exact subject and assign it to an agent. | The admission decides which jobs get in. See [Subjects](#subjects). |
-| Give the agent `org:device_agent_sync`. Add `org:hooks_ingest` if you want hook events. | They let the job fetch its plugins and send hook events. |
-| Assign the agent the plugins it should get. | The job's MCP servers come from those plugins, and hook events need the observability plugin. |
-| Give the agent access to each MCP server it should use. | Servers the agent can't access show as "needs authentication". |
+| Trusts GitHub | Reuses or registers `https://token.actions.githubusercontent.com` as an organization-level workload issuer. |
+| Admits the jobs | Writes one organization-level rule for the jobs you chose and assigns it to the agent. Warns if a project has its own GitHub issuer. |
+| Gives the agent its permissions | `org:device_agent_sync` to fetch plugins, `org:hooks_ingest` to send this project's hook events, and access to the servers from MCP Selection. |
+| Shows what the job will get | The plugins installed for Everyone in the project, the servers the job skips (gateways, and servers with no Speakeasy authorization server), and those the agent can't reach. |
+| Writes the workflow | Runs this action with your organization ID and project filled in, with every action pinned to a commit SHA. |
+
+### Setting it up by hand
+
+Without the guided setup, for example through the API or the **Custom OIDC issuer** flow under **Advanced**:
+
+1. Register `https://token.actions.githubusercontent.com` as a workload issuer with **Available to** set to **Organization**. Its keys are at `https://token.actions.githubusercontent.com/.well-known/jwks`.
+2. Under that issuer, admit one of the rules in [Subjects](#subjects) for the organization and assign it to an agent.
+3. Give the agent `org:device_agent_sync`, plus `org:hooks_ingest` for the project the job's `project` input names, and access to each MCP server it should use.
+4. Assign the agent its plugins, to Everyone or to a role it holds. The job's MCP servers come from them.
+
+Speakeasy's device-agent token endpoint only reads organization-level issuers and rules, and the Custom OIDC issuer flow defaults to the current project. A project with its own GitHub issuer also checks jobs against that issuer, not the organization's rule, for its own MCP servers.
 
 ### Subjects
 
-GitHub sets the token's `sub` claim from the event that ran the job:
+GitHub sets the token's `sub` claim from the job:
 
 | Job | Subject |
 |---|---|
 | Push to `main` | `repo:<owner>/<repo>:ref:refs/heads/main` |
 | Pull request | `repo:<owner>/<repo>:pull_request` |
-| Deployment environment | `repo:<owner>/<repo>:environment:<name>` |
+| Any job that references an environment, whatever its event | `repo:<owner>/<repo>:environment:<name>` |
 
-Admit exact subjects. A wildcard on `sub` lets in every branch and every pull request of the repository. If a job is refused, the action prints its subject so you can copy it.
+**Which jobs** picks the rule:
+
+| Which jobs | Rule | Admits |
+|---|---|---|
+| Whole repository (default) | `repo:<owner>/<repo>:*` | Every branch, tag, environment and pull request job in the repository. On `pull_request`, forks get no OIDC token. |
+| One branch | `repo:<owner>/<repo>:ref:refs/heads/<branch>` | Jobs on that branch with no environment, such as a push or `workflow_dispatch`. Not pull requests. |
+| One environment | `repo:<owner>/<repo>:environment:<name>` | Only jobs that reference that environment, so GitHub runs its protection rules (required reviewers, allowed branches) first. |
+
+Use one environment for anything sensitive. Anyone who can push a branch can run a job the whole repository admits. A `pull_request_target` workflow runs in the base repository with its permissions, so with `id-token: write` it gets a token for a fork's pull request too. Set the environment's protection rules before a workflow names it: GitHub creates a missing environment with no rules.
+
+Owner and repository names are case-sensitive. Repositories created, renamed or transferred since July 15, 2026 put IDs in the subject: enter `<owner>@<id>` and `<repo>@<id>`. If a job is refused, the action prints its subject.
 
 ## Use it
 
-The action writes each installed tool's configuration, so install the tools first.
+The action writes each installed tool's configuration, so install the tools and create their configuration directories first.
+
+<details>
+<summary><strong>Claude Code</strong></summary>
 
 ```yaml
-permissions:
-  id-token: write # lets the job request a GitHub OIDC token
-  contents: read
+on: workflow_dispatch
 
-steps:
-  - run: npm install -g @anthropic-ai/claude-code
-  - uses: speakeasy-api/device-agent-action@v1
-    with:
-      organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
-      project: ci # hook events go to this project
-  - run: claude -p "Summarize the open incidents" # has the agent's Speakeasy MCP servers
-```
-
-For fully reproducible builds, pin the action to a commit SHA with a `# v1.x.y` comment, and pin speakeasyd with `version`.
-
-### With `anthropics/claude-code-action`
-
-This works with no stored secret on either side: the Anthropic API takes the job's OIDC token through workload identity federation, and Speakeasy takes it through this action.
-
-```yaml
-steps:
-  - run: npm install -g @anthropic-ai/claude-code
-  - uses: speakeasy-api/device-agent-action@v1
-    with:
-      organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
-      project: ci
-  - uses: anthropics/claude-code-action@v1
-    with:
-      anthropic_federation_rule_id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
-      anthropic_organization_id: ${{ vars.ANTHROPIC_ORG_ID }}
-      anthropic_service_account_id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
-      anthropic_workspace_id: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
-      github_token: ${{ github.token }}
-      display_report: false # keeps tool output out of the step summary
-      prompt: List the Linear teams I can see.
-      claude_args: --allowedTools mcp__speakeasy-linear-1a2b
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # lets the job request a GitHub OIDC token for Speakeasy
+      contents: read
+    steps:
+      - run: |
+          npm install -g @anthropic-ai/claude-code
+          mkdir -p "$HOME/.claude"
+      - uses: speakeasy-api/device-agent-action@v1
+        with:
+          organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
+          project: ci # hook events go to this project
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: List the Linear teams I can see.
+          claude_args: --allowedTools mcp__speakeasy-linear-1a2b
 ```
 
 - `claude-code-action` removes GitHub's OIDC request variables from Claude's environment. Speakeasy's token helpers then get their tokens from the speakeasyd this action leaves running, so keep this action before it in the same job.
 - Speakeasy MCP servers are named `speakeasy-<server>-<suffix>`. Get the exact names from `claude mcp list` or the sync report, then allow them with `--allowedTools`.
+
+</details>
+
+<details>
+<summary><strong>Codex</strong></summary>
+
+```yaml
+on: workflow_dispatch
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # lets the job request a GitHub OIDC token for Speakeasy
+      contents: read
+    steps:
+      - run: |
+          npm install -g @openai/codex
+          mkdir -p "$HOME/.codex"
+      - uses: speakeasy-api/device-agent-action@v1
+        with:
+          organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
+          project: ci # hook events go to this project
+      - uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt: List the Linear teams I can see.
+```
+
+`codex-action` reads the Speakeasy MCP servers from `~/.codex`, where this action wrote them.
+
+</details>
+
+For fully reproducible builds, pin the action to a commit SHA with a `# v1.x.y` comment, and pin speakeasyd with `version`.
 
 ## Inputs
 
@@ -113,14 +169,14 @@ Nothing writes a token to disk or to the job log. speakeasyd only hands out shor
 |---|---|
 | Notice: skipped on a pull request from a fork | Nothing. GitHub gives fork pull requests no OIDC token. |
 | Error: the job has no GitHub OIDC token | Add `id-token: write` to the job's `permissions`. |
-| Error: Speakeasy refused this job's GitHub token | Check the first two setup steps for the subject printed in the error. Speakeasy gives the same `invalid_grant` for every refusal, so the action can't tell which step is missing. |
-| Error naming `org:device_agent_sync` | Give the agent that permission. |
+| Error: Speakeasy refused this job's GitHub token | Compare the printed subject with the agent's rule (edit the agent to see which jobs it admits; see [Subjects](#subjects)), and check the rule is still assigned to the agent. Set up by hand? Check the issuer and rule are organization-level. Speakeasy gives the same `invalid_grant` for every refusal, so the action can't tell which is wrong. |
+| Error naming `org:device_agent_sync` | Give the agent that permission. Its owner must hold it too. |
 | Error: did not pick up the GitHub identity | The speakeasyd in use has no GitHub Actions support. Use the latest stable release, or set `version` to one that has it. |
 | Error: a speakeasyd version is not a stable release, or is blocked | Set `version` to another stable release, or to `latest`. |
 | Error: a speakeasyd SHA-256 or size doesn't match | The download doesn't match Speakeasy's release records. Tell Speakeasy rather than working around it. |
-| Warning: a tool is not set up | Install it before this step, or read the sync report. |
+| Warning: a tool is not set up | Install it and create its configuration directory before this step, or read the sync report. |
 | Warning: hook events are off | Set the `project` input. |
-| An MCP server shows "needs authentication" | Give the agent access to that server. speakeasyd logs `invalid_grant` for it and backs off. |
+| An MCP server shows "needs authentication" | Edit the agent and add that server under **MCP Selection**. speakeasyd logs `invalid_grant` for it and backs off. |
 
 ## Limits
 
