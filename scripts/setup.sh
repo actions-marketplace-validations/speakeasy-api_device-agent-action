@@ -140,7 +140,15 @@ set -e
 case "$code" in
 0) ;;
 2) explain_fetch_failure ;;
-3) fail "$installed did not pick up the GitHub identity ($(tail -n 1 "$errlog")). This action needs a speakeasyd release with GitHub Actions support: use latest once one is stable, or set the version input to one." ;;
+3)
+	# The version input is ignored with speakeasyd-binary, so don't suggest it.
+	if [ -n "${INPUT_SPEAKEASYD_BINARY:-}" ]; then
+		fix="That binary has no GitHub Actions support."
+	else
+		fix="It has no GitHub Actions support: use the latest stable release, or set the version input to one that has it."
+	fi
+	fail "$installed did not pick up the GitHub identity ($(tail -n 1 "$errlog")). $fix"
+	;;
 *) fail "speakeasyd sync failed (exit $code): $(tail -n 3 "$errlog")" ;;
 esac
 
