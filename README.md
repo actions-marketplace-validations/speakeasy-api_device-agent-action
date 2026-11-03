@@ -134,6 +134,7 @@ jobs:
 | `project` | no | Speakeasy project slug for this job's hook events. Leave it empty to turn hook events off. |
 | `control-plane-url` | no | Defaults to `https://ai.speakeasy.com`. The token audience is built from it, so it must be the host that serves the device-agent API. |
 | `version` | no | The speakeasyd to install. Defaults to `latest`, the latest stable release. Set a stable version like `0.1.52` (a leading `v` is fine) for reproducible builds: pinning the action to a SHA doesn't pin speakeasyd. |
+| `channel` | no | Speakeasy dogfood only, unsupported: leave it at `stable`. `internal` installs unreleased speakeasyd builds for Speakeasy's own testing, and they may be broken or pulled. |
 | `speakeasyd-binary` | no | Path to a speakeasyd already on the runner, used instead of a release. Only for testing unreleased builds. |
 
 ## Outputs
@@ -172,7 +173,7 @@ Nothing writes a token to disk or to the job log. speakeasyd only hands out shor
 | Error: Speakeasy refused this job's GitHub token | Compare the printed subject with the agent's rule (edit the agent to see which jobs it admits; see [Subjects](#subjects)), and check the rule is still assigned to the agent. Set up by hand? Check the issuer and rule are organization-level. Speakeasy gives the same `invalid_grant` for every refusal, so the action can't tell which is wrong. |
 | Error naming `org:device_agent_sync` | Give the agent that permission. Its owner must hold it too. |
 | Error: did not pick up the GitHub identity | The speakeasyd in use has no GitHub Actions support. Use the latest stable release, or set `version` to one that has it. |
-| Error: a speakeasyd version is not a stable release, or is blocked | Set `version` to another stable release, or to `latest`. |
+| Error: a speakeasyd version is not a release on the stable channel, or is blocked | Set `version` to another stable release, or to `latest`. |
 | Error: a speakeasyd SHA-256 or size doesn't match | The download doesn't match Speakeasy's release records. Tell Speakeasy rather than working around it. |
 | Warning: a tool is not set up | Install it and create its configuration directory before this step, or read the sync report. |
 | Warning: hook events are off | Set the `project` input. |
