@@ -12,8 +12,8 @@
 #   releases.json         the stable manifest: latest release, blocked_versions
 #   release-history.json  every release promoted to stable, for a pinned VERSION
 # Both have the same artifact records ({goos, goarch, url, sha256, size}) that
-# speakeasyd's own updater reads (device-agent core/updater). A manifest
-# pinned_target needs no handling here: it already repoints latest.
+# speakeasyd's own updater reads. A manifest pinned_target needs no handling
+# here: it already repoints latest.
 set -euo pipefail
 
 RELEASES=https://storage.googleapis.com/speakeasy-device-agent-releases-prod

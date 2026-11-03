@@ -2,11 +2,10 @@
 # Connects this job's AI tools to Speakeasy with the job's GitHub OIDC token:
 # installs speakeasyd, writes its managed configuration, and runs one sync.
 #
-# speakeasyd does the token work itself (device-agent ADR-0025): it asks the
-# Actions runtime for an OIDC token, exchanges it at the organization's
-# device-agent endpoint, and writes each tool's MCP entries with a helper that
-# fetches a fresh token per connection. This script never sees or prints a
-# Speakeasy token.
+# speakeasyd does the token work itself: it asks the Actions runtime for an
+# OIDC token, exchanges it at the organization's device-agent endpoint, and
+# writes each tool's MCP entries with a helper that fetches a fresh token per
+# connection. This script never sees or prints a Speakeasy token.
 set -euo pipefail
 
 ISSUER=https://token.actions.githubusercontent.com
