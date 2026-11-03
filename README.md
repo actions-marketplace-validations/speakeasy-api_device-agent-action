@@ -77,7 +77,7 @@ jobs:
       - run: |
           npm install -g @anthropic-ai/claude-code
           mkdir -p "$HOME/.claude"
-      - uses: speakeasy-api/device-agent-action@v1
+      - uses: speakeasy-api/device-agent-action@v0.1
         with:
           organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
           project: ci # hook events go to this project
@@ -110,7 +110,7 @@ jobs:
       - run: |
           npm install -g @openai/codex
           mkdir -p "$HOME/.codex"
-      - uses: speakeasy-api/device-agent-action@v1
+      - uses: speakeasy-api/device-agent-action@v0.1
         with:
           organization-id: ${{ vars.SPEAKEASY_ORG_ID }}
           project: ci # hook events go to this project
@@ -124,7 +124,7 @@ jobs:
 
 </details>
 
-For fully reproducible builds, pin the action to a commit SHA with a `# v1.x.y` comment, and pin speakeasyd with `version`.
+`@v0.1` follows the latest v0.1.x release of the action. Breaking changes go to `@v0.2`. For fully reproducible builds, pin the action to a commit SHA with a `# v0.1.x` comment, and pin speakeasyd with `version`. The two are numbered independently: the `# v0.1.x` comment is the action's version, and `version` is speakeasyd's.
 
 ## Inputs
 
