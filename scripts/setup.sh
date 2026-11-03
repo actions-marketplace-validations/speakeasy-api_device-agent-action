@@ -2,11 +2,10 @@
 # Connects this job's AI tools to Speakeasy with the job's GitHub OIDC token:
 # installs speakeasyd, writes its managed configuration, and runs one sync.
 #
-# speakeasyd does the token work itself (device-agent ADR-0025): it asks the
-# Actions runtime for an OIDC token, exchanges it at the organization's
-# device-agent endpoint, and writes each tool's MCP entries with a helper that
-# fetches a fresh token per connection. This script never sees or prints a
-# Speakeasy token.
+# speakeasyd does the token work itself: it asks the Actions runtime for an
+# OIDC token, exchanges it at the organization's device-agent endpoint, and
+# writes each tool's MCP entries with a helper that fetches a fresh token per
+# connection. This script never sees or prints a Speakeasy token.
 set -euo pipefail
 
 ISSUER=https://token.actions.githubusercontent.com
@@ -141,7 +140,15 @@ set -e
 case "$code" in
 0) ;;
 2) explain_fetch_failure ;;
-3) fail "$installed did not pick up the GitHub identity ($(tail -n 1 "$errlog")). This action needs a speakeasyd release with GitHub Actions support: use latest once one is stable, or set the version input to one." ;;
+3)
+	# The version input is ignored with speakeasyd-binary, so don't suggest it.
+	if [ -n "${INPUT_SPEAKEASYD_BINARY:-}" ]; then
+		fix="That binary has no GitHub Actions support."
+	else
+		fix="It has no GitHub Actions support: use the latest stable release, or set the version input to one that has it."
+	fi
+	fail "$installed did not pick up the GitHub identity ($(tail -n 1 "$errlog")). $fix"
+	;;
 *) fail "speakeasyd sync failed (exit $code): $(tail -n 3 "$errlog")" ;;
 esac
 

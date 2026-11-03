@@ -2,11 +2,12 @@
 
 The action installs the latest stable speakeasyd when it runs, or the release a workflow pins with the `version` input. An action release doesn't touch speakeasyd.
 
-1. Tag the release (`v1.x.y`) and move the major tag (`v1`) to it.
+1. Tag the release (`v1.x.y`), create a GitHub release from it, and move the major tag (`v1`) to it. Marketplace listings only get new versions from GitHub releases.
 
-## Before the first Marketplace release
+## The first release
 
-- Choose a license and add `LICENSE`.
-- Make the repository public.
-- Replace `@main` in the README examples with `@v1`.
-- Once a stable speakeasyd release has GitHub Actions support (device-agent #296), remove the README's preview note and its "Test before the speakeasyd release" section.
+1. Wait for a stable speakeasyd release with GitHub Actions support. Until one exists, the action stops with "did not pick up the GitHub identity".
+2. Update the `0.1.52` examples (README, `action.yml`, and the version error in `scripts/download-speakeasyd.sh`) to the first stable speakeasyd version with GitHub Actions support.
+3. Make the repository public.
+4. Tag `v1.0.0`, create a GitHub release from it, and point `v1` at it.
+5. Optional: publish to the GitHub Marketplace by ticking "Publish this Action to the GitHub Marketplace" on the release. The repository qualifies; keep it that way: one `action.yml` at the root, `branding` set, and no workflow files. The listing name (`name` in `action.yml`) must be unique on the Marketplace.
