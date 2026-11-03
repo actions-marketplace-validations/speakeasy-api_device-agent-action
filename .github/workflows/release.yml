@@ -1,0 +1,58 @@
+name: Release
+
+# Runs for exact version tags only. The moving minor tags (v0.1) don't match, and
+# pull requests never trigger it.
+on:
+  push:
+    tags:
+      - "v0.*.*"
+      - "v[1-9]*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      SEMVER: '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+    steps:
+      - name: Refuse anything but a vMAJOR.MINOR.PATCH tag
+        run: |
+          if [[ ! "$TAG" =~ $SEMVER ]]; then
+            echo "::error::$TAG is not a vMAJOR.MINOR.PATCH tag, so it gets no release."
+            exit 1
+          fi
+
+      - name: Create the GitHub release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "The $TAG release already exists."
+          else
+            gh release create "$TAG" --generate-notes --verify-tag
+          fi
+
+      - name: Move the minor tag to this release
+        run: |
+          minor="${TAG%.*}"
+          latest=$(gh api --paginate "repos/$GH_REPO/git/matching-refs/tags/$minor." --jq '.[].ref | ltrimstr("refs/tags/")' \
+            | grep -E "$SEMVER" | sort -V | tail -n 1)
+          if [[ "$latest" != "$TAG" ]]; then
+            echo "::notice::$latest is later than $TAG, so $minor stays where it is."
+            exit 0
+          fi
+
+          # On a tag push, GITHUB_SHA is the tagged commit, even for an annotated tag.
+          if gh api "repos/$GH_REPO/git/ref/tags/$minor" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$minor" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$minor" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          echo "$minor now points at $TAG ($GITHUB_SHA)."
