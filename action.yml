@@ -65,4 +65,5 @@ runs:
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_CHANNEL: ${{ inputs.channel }}
         INPUT_SPEAKEASYD_BINARY: ${{ inputs.speakeasyd-binary }}
-        IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork == true }}
+        # Only to look up a commented pull request's head repository. setup.sh unsets it before speakeasyd runs.
+        PR_LOOKUP_TOKEN: ${{ github.token }}
