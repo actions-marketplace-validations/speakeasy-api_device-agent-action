@@ -28,14 +28,53 @@ https://*) ;;
 *) fail "control-plane-url must be an https URL, got: $control_plane" ;;
 esac
 
-# Pull requests from forks get no OIDC token, so skip them. Any other job
-# without one is missing the permission.
+# pull_request_head sets head_repo to the repository a pull request's head is
+# in ("a deleted fork" when it has none), or returns 1 when this job's event
+# isn't about a pull request. issue_comment names only the pull request, so its
+# head comes from the API, and any failure there stops the job: an unknown head
+# is never taken for this repository.
+pull_request_head() {
+	local number response status reason hint
+	case "${GITHUB_EVENT_NAME:-}" in
+	pull_request | pull_request_target | pull_request_review | pull_request_review_comment | workflow_run)
+		head_repo="$(jq -r '(.pull_request.head.repo // .workflow_run.head_repository).full_name // "a deleted fork"' \
+			"$GITHUB_EVENT_PATH")" || fail "Could not read this job's $GITHUB_EVENT_NAME event."
+		;;
+	issue_comment)
+		number="$(jq -r 'select(.issue.pull_request) | .issue.number' "$GITHUB_EVENT_PATH")" ||
+			fail "Could not read this job's $GITHUB_EVENT_NAME event."
+		[ -n "$number" ] || return 1
+		response="$(curl --silent --show-error --proto '=https' --tlsv1.2 --retry 3 --max-time 30 -w '\n%{http_code}' \
+			-H "Authorization: Bearer ${PR_LOOKUP_TOKEN:-}" -H 'Accept: application/vnd.github+json' \
+			"${GITHUB_API_URL:-https://api.github.com}/repos/$GITHUB_REPOSITORY/pulls/$number")" ||
+			fail "Could not reach the GitHub API to check whether pull request #$number comes from a fork."
+		status="${response##*$'\n'}"
+		response="${response%$'\n'*}"
+		if [ "$status" != 200 ]; then
+			reason="$(jq -r '.message // empty' <<<"$response" 2>/dev/null)" || reason=
+			hint="Re-run the job."
+			case "$status" in
+			401 | 403 | 404) hint='Add "permissions: pull-requests: read" to the job.' ;;
+			esac
+			fail "Could not look up pull request #$number to check whether it comes from a fork (HTTP $status${reason:+: $reason}). $hint"
+		fi
+		head_repo="$(jq -r '.head.repo.full_name // "a deleted fork"' <<<"$response")" ||
+			fail "The GitHub API answered with something other than pull request #$number."
+		;;
+	*) return 1 ;;
+	esac
+}
+
+# Pull requests from forks get no Speakeasy access, whatever the event: on
+# issue_comment, pull_request_target and workflow_run they get this
+# repository's secrets and OIDC token.
+if pull_request_head && [ "$head_repo" != "$GITHUB_REPOSITORY" ]; then
+	notice "Skipped: this $GITHUB_EVENT_NAME job is for a pull request from $head_repo, not $GITHUB_REPOSITORY. Pull requests from forks get no Speakeasy access."
+	output skipped true
+	exit 0
+fi
+unset PR_LOOKUP_TOKEN
 if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
-	if [ "${IS_FORK_PR:-false}" = true ]; then
-		notice "Skipped: pull requests from forks get no GitHub OIDC token."
-		output skipped true
-		exit 0
-	fi
 	fail 'This job has no GitHub OIDC token. Add "permissions: id-token: write" to the job.'
 fi
 output skipped false

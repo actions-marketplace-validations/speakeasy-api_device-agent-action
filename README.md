@@ -43,17 +43,18 @@ GitHub sets the token's `sub` claim from the job:
 |---|---|
 | Push to `main` | `repo:<owner>/<repo>:ref:refs/heads/main` |
 | Pull request | `repo:<owner>/<repo>:pull_request` |
+| Comment on an issue or pull request (`issue_comment`), which runs on the default branch | `repo:<owner>/<repo>:ref:refs/heads/<default branch>` |
 | Any job that references an environment, whatever its event | `repo:<owner>/<repo>:environment:<name>` |
 
 **Which jobs** picks the rule:
 
 | Which jobs | Rule | Admits |
 |---|---|---|
-| Whole repository (default) | `repo:<owner>/<repo>:*` | Every branch, tag, environment and pull request job in the repository. On `pull_request`, forks get no OIDC token. |
-| One branch | `repo:<owner>/<repo>:ref:refs/heads/<branch>` | Jobs on that branch with no environment, such as a push or `workflow_dispatch`. Not pull requests. |
+| Whole repository (default) | `repo:<owner>/<repo>:*` | Every branch, tag, environment and pull request job in the repository. The action skips [pull requests from forks](#pull-requests-from-forks). |
+| One branch | `repo:<owner>/<repo>:ref:refs/heads/<branch>` | Jobs on that branch with no environment, such as a push or `workflow_dispatch`. Not `pull_request` jobs. The default branch's rule also admits `issue_comment` jobs, comments on pull requests included. |
 | One environment | `repo:<owner>/<repo>:environment:<name>` | Only jobs that reference that environment, so GitHub runs its protection rules (required reviewers, allowed branches) first. |
 
-Use one environment for anything sensitive. Anyone who can push a branch can run a job the whole repository admits. A `pull_request_target` workflow runs in the base repository with its permissions, so with `id-token: write` it gets a token for a fork's pull request too. Set the environment's protection rules before a workflow names it: GitHub creates a missing environment with no rules.
+Use one environment for anything sensitive. Anyone who can push a branch can run a job the whole repository admits. For jobs that comments start, see [Pull requests from forks](#pull-requests-from-forks). Set the environment's protection rules before a workflow names it: GitHub creates a missing environment with no rules.
 
 Owner and repository names are case-sensitive. Repositories created, renamed or transferred since July 15, 2026 put IDs in the subject: enter `<owner>@<id>` and `<repo>@<id>`. If a job is refused, the action prints its subject.
 
@@ -126,6 +127,18 @@ jobs:
 
 `@v0.1` follows the latest v0.1.x release of the action. Breaking changes go to `@v0.2`. For fully reproducible builds, pin the action to a commit SHA with a `# v0.1.x` comment, and pin speakeasyd with `version`. The two are numbered independently: the `# v0.1.x` comment is the action's version, and `version` is speakeasyd's.
 
+## Pull requests from forks
+
+The action skips every job for a pull request from a fork, whatever the event and even with an environment: it sets `skipped` to `true` and gives the job no Speakeasy access. Check `skipped` before steps that need Speakeasy.
+
+On `pull_request`, GitHub gives a fork's pull request no secrets and no OIDC token anyway. But on `issue_comment` (for example `@claude` in a comment), `pull_request_target` and `workflow_run`, the job runs in your repository with its secrets and OIDC token, even for a fork's pull request. `pull_request_review` and `pull_request_review_comment` behave like `pull_request`, unless a private repository sends secrets or write tokens to fork pull requests.
+
+- The action compares the pull request's head repository with yours. An `issue_comment` event names only the pull request, so the action looks it up with the job's token: give an `issue_comment` job `pull-requests: read`. If the lookup fails, the action stops with an error rather than guess.
+- Still limit who can start these jobs. Anyone who can comment can start an `issue_comment` job, on an issue or a pull request from your own repository too. Check who commented in the job's `if`, or use an environment with required reviewers:
+  ```yaml
+  if: contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+  ```
+
 ## Inputs
 
 | Input | Required | Description |
@@ -148,8 +161,9 @@ jobs:
 
 ## How it works
 
-1. **Install.** The action finds the release in Speakeasy's stable release records (`releases.json` for `latest`, `release-history.json` for a pinned `version`) and refuses one Speakeasy has blocked. It downloads the runner's build over HTTPS from Speakeasy's releases bucket, checks its SHA-256 and size against the records, stops on any mismatch, and installs it at `/usr/local/bin/speakeasyd`.
-2. **Configure.** It writes a root-owned managed configuration (`/etc/speakeasy/managed.json` on Linux). The file holds no secret, only where the identity comes from:
+1. **Skip forks.** On a job for a [pull request from a fork](#pull-requests-from-forks), the action stops here and sets `skipped`.
+2. **Install.** The action finds the release in Speakeasy's stable release records (`releases.json` for `latest`, `release-history.json` for a pinned `version`) and refuses one Speakeasy has blocked. It downloads the runner's build over HTTPS from Speakeasy's releases bucket, checks its SHA-256 and size against the records, stops on any mismatch, and installs it at `/usr/local/bin/speakeasyd`.
+3. **Configure.** It writes a root-owned managed configuration (`/etc/speakeasy/managed.json` on Linux). The file holds no secret, only where the identity comes from:
    ```json
    {
      "v": 1,
@@ -159,8 +173,8 @@ jobs:
      "workload_identity": {"source": "github_actions", "organization_id": "<org>", "hooks_project_slug": "<project>"}
    }
    ```
-3. **Sync once.** `speakeasyd sync --once` requests a GitHub OIDC token for the audience `https://ai.speakeasy.com/oauth/workload/device-agent/<org>/token`. It exchanges it there for a 15-minute Speakeasy token and fetches the agent's plugins. Then it writes each tool's MCP entries with a helper, `speakeasyd mcp-token`, that gets a fresh token for each connection.
-4. **Keep speakeasyd running.** The action starts speakeasyd in the background for the rest of the job. Token helpers in later steps ask it over its owner-only socket when they can't request a GitHub token themselves.
+4. **Sync once.** `speakeasyd sync --once` requests a GitHub OIDC token for the audience `https://ai.speakeasy.com/oauth/workload/device-agent/<org>/token`. It exchanges it there for a 15-minute Speakeasy token and fetches the agent's plugins. Then it writes each tool's MCP entries with a helper, `speakeasyd mcp-token`, that gets a fresh token for each connection.
+5. **Keep speakeasyd running.** The action starts speakeasyd in the background for the rest of the job. Token helpers in later steps ask it over its owner-only socket when they can't request a GitHub token themselves.
 
 Nothing writes a token to disk or to the job log. speakeasyd only hands out short-lived Speakeasy tokens, never GitHub ones, and the runner stops it when the job ends.
 
@@ -168,7 +182,8 @@ Nothing writes a token to disk or to the job log. speakeasyd only hands out shor
 
 | What you see | What to do |
 |---|---|
-| Notice: skipped on a pull request from a fork | Nothing. GitHub gives fork pull requests no OIDC token. |
+| Notice: skipped on a pull request from a fork | Nothing. See [Pull requests from forks](#pull-requests-from-forks). |
+| Error: could not look up pull request #N | On `issue_comment`, add `pull-requests: read` to the job's `permissions`. For any other HTTP status, re-run the job. |
 | Error: the job has no GitHub OIDC token | Add `id-token: write` to the job's `permissions`. |
 | Error: Speakeasy refused this job's GitHub token | Compare the printed subject with the agent's rule (edit the agent to see which jobs it admits; see [Subjects](#subjects)), and check the rule is still assigned to the agent. Set up by hand? Check the issuer and rule are organization-level. Speakeasy gives the same `invalid_grant` for every refusal, so the action can't tell which is wrong. |
 | Error naming `org:device_agent_sync` | Give the agent that permission. Its owner must hold it too. |
